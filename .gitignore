@@ -1,0 +1,13 @@
+.DS_STORE
+
+*.dSYM
+*.idb
+
+*.exe
+*.o
+
+*.json
+*.scene
+*.ppm
+
+raytrace

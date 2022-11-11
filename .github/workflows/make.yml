@@ -1,0 +1,27 @@
+name: Build with GNU Make
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+        matrix:
+            os: [ubuntu-22.04, macos-12]
+
+    steps:
+    - uses: actions/checkout@v3.0.2
+    - name: Make debug raytrace (Clang)
+      run: CC="clang" make debug
+    - name: Make debug raytrace (GCC)
+      run: make clean && CC=gcc-11 make debug
+    - name: Make release raytrace (Clang)
+      run: make clean && CC="clang" make
+    - name: Make release raytrace (GCC)
+      run: make clean && CC=gcc-11 make
+    - name: Make release raytrace (default CC)
+      run: make clean && make
+    - name: Test release build
+      run: ./raytrace 100 100 input.json output.ppm
+    - name: Test debug build with sanitizers
+      run: ./test-debug.sh 100 100 input.scene output.ppm
