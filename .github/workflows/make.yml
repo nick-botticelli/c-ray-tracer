@@ -22,6 +22,6 @@ jobs:
     - name: Make release raytrace (default CC)
       run: make clean && make
     - name: Test release build
-      run: ./raytrace 100 100 input.json output.ppm
+      run: ./raytrace 100 100 input.scene output.ppm
     - name: Test debug build with sanitizers
       run: ./test-debug.sh 100 100 input.scene output.ppm
