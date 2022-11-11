@@ -576,12 +576,6 @@ int main(int argc, const char *argv[]) {
     sceneData.camera.imageHeight = height;
     sceneData.camera.vpDistance = 1;
     parseSceneInput(inputFile, &sceneData);
-
-#if defined(__clang__) && !defined(NDEBUG)
-    puts("======================  sceneData  ======================");
-    __builtin_dump_struct(&sceneData, &printf);
-    puts("=========================================================");
-#endif
     
     renderScene(&sceneData, image);
 

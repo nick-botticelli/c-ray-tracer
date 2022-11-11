@@ -4,7 +4,7 @@
 # Test debug builds using Clang sanitizers
 #
 
-PROGRAM="./raytrace 100 100 input.json output.ppm"
+PROGRAM="./raytrace 100 100 input.scene output.ppm"
 
 make clean
 CC="clang" make asan
