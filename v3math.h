@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <math.h>
 
-// TODO: Switch (float *) usage to use Vec3
+// TODO: Switch (float *) usage to use Vec3?
 typedef struct Vec3 {
     float x, y, z;
 } Vec3;

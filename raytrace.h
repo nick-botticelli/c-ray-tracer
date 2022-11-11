@@ -13,6 +13,8 @@
 
 #define DEFAULT_NS 20.0f
 
+#define ITERATIONS_MAX 100
+
 typedef enum {
     PLANE,
     SPHERE,
@@ -29,6 +31,9 @@ typedef enum {
 typedef struct Object {
     ObjectType type;
     PixelN diffuseColor, specularColor;
+    float reflectivity;
+    float refractivity;
+    float ior;
     
     union {
         // Plane properties
@@ -68,16 +73,6 @@ typedef struct Camera {
     float origin[3];
 } Camera;
 
-// typedef struct SceneData {
-//     Camera camera;
-    
-//     Object *objects;
-//     size_t numObjects;
-    
-//     Light *lights;
-//     size_t numLights;
-// } SceneData;
-
 // TODO: Use realloc to dynamically resize objects? Should be fine on stack
 typedef struct SceneData {
     Camera camera;
@@ -90,10 +85,10 @@ typedef struct SceneData {
 } SceneData;
 
 // TODO: Ray struct?
-// typedef struct Ray {
-//     float R0[3];
-//     float Rd[3];
-// }
+typedef struct Ray {
+    float R0[3];
+    float Rd[3];
+} Ray;
 
 #ifdef QUADRICS
 extern inline float raycastQuadric(float *R0, float *Rd, float *constants);
@@ -117,15 +112,21 @@ extern inline float raycastPlane(float *R0, float *Rd, float *pn, float d);
  */
 extern inline float raycastSphere(float *R0, float *Rd, float *sphereCenter, float radius);
 
+extern inline void calculateNormalVector(Object *object, float *point, float *N);
+
+extern inline void getIntersectionPoint(float *R0, float *Rd, float t, float *intersectionPoint);
+
 extern inline float calculateIllumination(float radialAtt, float angularAtt, float diffuseColor,
                                           float specularColor, float lightColor, float *L,
                                           float *N, float *R, float *V, float ns);
 
-extern inline PixelN illuminate(float *cameraOrigin, float *point, Object *objects,
+extern inline PixelN illuminate(float *cameraOrigin, float *Rd, float *point, Object *objects,
                                 size_t numObjects, Object *object, Light *lights,
-                                size_t numLights);
+                                size_t numLights, PixelN reflectionColor);
 
-extern inline void getIntersectionPoint(float *R0, float *Rd, float t, float *intersectionPoint);
+extern inline PixelN raytrace(Object *object, float *point, float *Rd, float *cameraOrigin,
+                              Object *objects, size_t numObjects, Light *lights, size_t numLights,
+                              int iterationNum);
 
 extern inline Object *raycast(float *R0, float *Rd, Object *objects, size_t numObjects,
                               Object *ignoredObject, float *nearestT);
