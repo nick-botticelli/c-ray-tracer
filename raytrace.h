@@ -13,7 +13,7 @@
 
 #define DEFAULT_NS 20.0f
 
-#define ITERATIONS_MAX 100
+#define ITERATIONS_MAX 256
 
 typedef enum {
     PLANE,
@@ -31,9 +31,7 @@ typedef enum {
 typedef struct Object {
     ObjectType type;
     PixelN diffuseColor, specularColor;
-    float reflectivity;
-    float refractivity;
-    float ior;
+    float reflectivity, refractivity, ior;
     
     union {
         // Plane properties
@@ -120,13 +118,13 @@ extern inline float calculateIllumination(float radialAtt, float angularAtt, flo
                                           float specularColor, float lightColor, float *L,
                                           float *N, float *R, float *V, float ns);
 
-extern inline PixelN illuminate(float *cameraOrigin, float *Rd, float *point, Object *objects,
+extern inline PixelN illuminate(float *cameraOrigin, float *point, Object *objects,
                                 size_t numObjects, Object *object, Light *lights,
                                 size_t numLights, PixelN reflectionColor);
 
 extern inline PixelN raytrace(Object *object, float *point, float *Rd, float *cameraOrigin,
                               Object *objects, size_t numObjects, Light *lights, size_t numLights,
-                              int iterationNum);
+                              int iterationNum, int x, int y);
 
 extern inline Object *raycast(float *R0, float *Rd, Object *objects, size_t numObjects,
                               Object *ignoredObject, float *nearestT);

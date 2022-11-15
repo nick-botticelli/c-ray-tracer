@@ -151,7 +151,7 @@ inline float calculateIllumination(float radialAtt, float angularAtt, float diff
     return illumination;
 }
 
-inline PixelN illuminate(float *cameraOrigin, float *Rd, float *point, Object *objects,
+inline PixelN illuminate(float *cameraOrigin, float *point, Object *objects,
                          size_t numObjects, Object *object, Light *lights, size_t numLights, PixelN reflectionColor) {
     // point  - the point we are coloring
     // object - the object the point is on
@@ -159,7 +159,7 @@ inline PixelN illuminate(float *cameraOrigin, float *Rd, float *point, Object *o
     
     PixelN color = { 0, 0, 0 };
     PixelN reflectedColor = { 0, 0, 0 };
-    float reflectRefractModifier = 1 - object->reflectivity - object->refractivity;
+    float reflectRefractModifier = 1 - object->reflectivity /*- object->refractivity*/;
     //float reflectRefractModifier = 1;
     
     for (size_t index = 0; index < numLights; index++) {
@@ -261,18 +261,25 @@ inline PixelN illuminate(float *cameraOrigin, float *Rd, float *point, Object *o
     return color;
 }
 
+#ifndef NDEBUG
+int highestIteration = 0;
+#endif
+
 // Returns reflection color
 inline PixelN raytrace(Object *object, float *point, float *Rd, float *cameraOrigin,
                        Object *objects, size_t numObjects, Light *lights, size_t numLights,
-                       int iterationNum) {
-    PixelN reflectionColor = { 0, 0, 0 }; 
+                       int iterationNum, int x, int y) {
+    PixelN reflectionColor = { 0, 0, 0 };
+
+#ifndef NDEBUG
+    if (highestIteration < iterationNum)
+        highestIteration = iterationNum;
+#endif
 
     if (iterationNum > ITERATIONS_MAX)
         return reflectionColor; // Black
     
-    //printf("%p, %p, %p, %p, %u, %p, %p, %u, %i", cameraOrigin, Rd, point, objects, numObjects, object, lights, numLights, iterationNum);
     float pointNormal[3] = { 0, 0, 0 };
-    //printf("\tpointNormal addr: %p\n", pointNormal);
     calculateNormalVector(object, point, pointNormal);
 
     // Get reflected ray direction from intersected point
@@ -280,9 +287,18 @@ inline PixelN raytrace(Object *object, float *point, float *Rd, float *cameraOri
     v3_reflect(reflectedRay, Rd, pointNormal);
     v3_normalize(reflectedRay, reflectedRay);
 
+    // if (x == 200 && y == 250) {
+    //     printf("%p, %p, %p, %p, %u, %p, %p, %u, %i, %p, %p\n", cameraOrigin, Rd, point, objects, numObjects, object, lights, numLights, iterationNum, reflectedRay, reflectionColor);
+    // }
+
     // Get the new object and new nearest t from reflected ray
     float newNearestT;
     Object *newObject = raycast(point, reflectedRay, objects, numObjects, object, &newNearestT);
+
+    if (x == 200 && y == 250) {
+        //printf("1: %p, %p, %p, %p, %u, %p, %p, %u, %i, %p, %p, %p\n", cameraOrigin, Rd, point, objects, numObjects, object, lights, numLights, iterationNum, reflectedRay, newObject, &reflectionColor);
+        printf("(%i) Object: %i\n", iterationNum, object->type);
+    }
 
     // If null, then there are no other objects to raytrace
     if (newObject == NULL)
@@ -292,17 +308,19 @@ inline PixelN raytrace(Object *object, float *point, float *Rd, float *cameraOri
     float newPoint[3] = { 0, 0, 0 };
     getIntersectionPoint(point, reflectedRay, newNearestT, newPoint);
 
-    //printf("\tbefore recursion (%i)\n", iterationNum);
-
+    // Recursion
     reflectionColor = raytrace(newObject, newPoint, reflectedRay, cameraOrigin, objects,
-                               numObjects, lights, numLights, iterationNum + 1);
+                               numObjects, lights, numLights, iterationNum + 1, x, y);
+
+    // if (x == 200 && y == 250) {
+    //     printf("2: %p, %p, %p, %p, %u, %p, %p, %u, %i, %p, %p, %p\n", cameraOrigin, Rd, point, objects, numObjects, object, lights, numLights, iterationNum, reflectedRay, newObject, &reflectionColor);
+    // }
     
     reflectionColor.r *= object->reflectivity;
     reflectionColor.g *= object->reflectivity;
     reflectionColor.b *= object->reflectivity;
 
-    // Recursion
-    return illuminate(cameraOrigin, reflectedRay, newPoint, objects, numObjects, newObject, lights,
+    return illuminate(cameraOrigin, newPoint, objects, numObjects, newObject, lights,
                       numLights, reflectionColor);
 }
 
@@ -391,13 +409,22 @@ inline void renderScene(SceneData *sceneData, Pixel *image) {
                 
                 PixelN pixelColorN = raytrace(nearestObject, intersectionPoint, Rd, camera.origin,
                                               sceneData->objects, sceneData->numObjects,
-                                              sceneData->lights, sceneData->numLights, 1);
+                                              sceneData->lights, sceneData->numLights, 1, x, y);
+
+                pixelColorN.r *= nearestObject->reflectivity;
+                pixelColorN.g *= nearestObject->reflectivity;
+                pixelColorN.b *= nearestObject->reflectivity;
+                
+                PixelN finalPixelColorN = illuminate(sceneData->camera.origin, intersectionPoint,
+                                                     sceneData->objects, sceneData->numObjects,
+                                                     nearestObject, sceneData->lights,
+                                                     sceneData->numLights, pixelColorN);
 
                 // Convert from PixelN to Pixel for PPM output
                 Pixel pixelColor;
-                pixelColor.r = pixelColorN.r * 255;
-                pixelColor.g = pixelColorN.g * 255;
-                pixelColor.b = pixelColorN.b * 255;
+                pixelColor.r = finalPixelColorN.r * 255;
+                pixelColor.g = finalPixelColorN.g * 255;
+                pixelColor.b = finalPixelColorN.b * 255;
 
                 image[rowIndex + x] = pixelColor;
             }
@@ -417,7 +444,14 @@ inline void parseSceneInput(FILE *inputFile, SceneData *sceneData) {
         curObject = &sceneData->objects[objIndex];
         curLight = &sceneData->lights[lightIndex];
 
+#ifdef REFRACTION
         curObject->refractivity = 0;
+        curObject->ior = 0;
+#endif
+
+#ifndef NDEBUG
+        printf("parseSceneInput: \"%s\"\n", inputBuf);
+#endif
         
         if (strcmp(inputBuf, "camera,") == 0) {
             const int numProperties = 2;
@@ -464,8 +498,18 @@ inline void parseSceneInput(FILE *inputFile, SceneData *sceneData) {
                     fscanf(inputFile, " %f", &curObject->reflectivity);
                 }
                 
+                // Check for existence of comma before optional specular and ns properties
+                if (i == numProperties - 3 || i == numProperties - 2) {
+                    char curChar = fgetc(inputFile);
+
+                    // If there is no comma, there are only 4 (no ns)
+                    if (curChar != ',') {
+                        ungetc(curChar, inputFile);
+                        break;
+                    }
+                }
                 // Skip comma
-                if (i != numProperties - 1)
+                else if (i != numProperties - 1)
                     fscanf(inputFile, "%s", inputBuf);
             }
 
@@ -479,7 +523,11 @@ inline void parseSceneInput(FILE *inputFile, SceneData *sceneData) {
         else if (strcmp(inputBuf, "sphere,") == 0) {
             bool hasNs = false;
 
+#ifdef REFRACTION
             const int numProperties = 8;
+#else
+            const int numProperties = 6;
+#endif
             for (int i = 0; i < numProperties; i++) {
                 fscanf(inputFile, "%s", inputBuf);
 
@@ -505,12 +553,14 @@ inline void parseSceneInput(FILE *inputFile, SceneData *sceneData) {
                 else if (strcmp(inputBuf, "reflectivity:") == 0) {
                     fscanf(inputFile, " %f", &curObject->reflectivity);
                 }
+#ifdef REFRACTION
                 else if (strcmp(inputBuf, "refractivity:") == 0) {
                     fscanf(inputFile, " %f", &curObject->refractivity);
                 }
                 else if (strcmp(inputBuf, "ior:") == 0) {
                     fscanf(inputFile, " %f", &curObject->ior);
                 }
+#endif
                 
                 // Check for existence of comma before optional ns property
                 if (i == numProperties - 2) {
@@ -671,6 +721,10 @@ int main(int argc, const char *argv[]) {
     writeImage(outputPpm, outputPpm.format, outputFileName);
 
     free(image);
+
+#ifndef NDEBUG
+    printf("Highest iterationNum: %i\n", highestIteration);
+#endif
 
     return EXIT_SUCCESS;
 }
