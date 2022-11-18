@@ -1,5 +1,5 @@
-# Project-4
-Project 4 consists of coloring objects based on the shading model discussed in class.
+# Project-5
+Project 5 consists of utilizing recursive raytracing to provide reflection.
 
 # Authors
 * Aiden Halili (agh237@nau.edu)
@@ -9,7 +9,7 @@ Project 4 consists of coloring objects based on the shading model discussed in c
 Run the program with five arguments: width, height, input scene file path, and output PPM path.
 
 Example:
-`./raycast 1000 1000 demo.scene output.ppm`
+`./raytrace 1000 1000 demo.scene output.ppm`
 
 # Known Issues
 * No known issues
