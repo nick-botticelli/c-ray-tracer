@@ -13,7 +13,7 @@
 
 #define DEFAULT_NS 20.0f
 
-#define ITERATIONS_MAX 256
+#define RECURSION_DEPTH 32
 
 typedef enum {
     PLANE,

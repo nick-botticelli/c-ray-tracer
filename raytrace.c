@@ -159,8 +159,10 @@ inline PixelN illuminate(float *cameraOrigin, float *point, Object *objects,
     
     PixelN color = { 0, 0, 0 };
     PixelN reflectedColor = { 0, 0, 0 };
-    float reflectRefractModifier = 1 - object->reflectivity /*- object->refractivity*/;
-    //float reflectRefractModifier = 1;
+    float reflectRefractModifier = 1 - object->reflectivity;
+#ifdef REFRACTION
+    reflectRefractModifier -= object->refractivity;
+#endif
     
     for (size_t index = 0; index < numLights; index++) {
         Light *light = &lights[index];
@@ -276,7 +278,7 @@ inline PixelN raytrace(Object *object, float *point, float *Rd, float *cameraOri
         highestIteration = iterationNum;
 #endif
 
-    if (iterationNum > ITERATIONS_MAX)
+    if (iterationNum > RECURSION_DEPTH)
         return reflectionColor; // Black
     
     float pointNormal[3] = { 0, 0, 0 };
@@ -287,18 +289,9 @@ inline PixelN raytrace(Object *object, float *point, float *Rd, float *cameraOri
     v3_reflect(reflectedRay, Rd, pointNormal);
     v3_normalize(reflectedRay, reflectedRay);
 
-    // if (x == 200 && y == 250) {
-    //     printf("%p, %p, %p, %p, %u, %p, %p, %u, %i, %p, %p\n", cameraOrigin, Rd, point, objects, numObjects, object, lights, numLights, iterationNum, reflectedRay, reflectionColor);
-    // }
-
     // Get the new object and new nearest t from reflected ray
     float newNearestT;
     Object *newObject = raycast(point, reflectedRay, objects, numObjects, object, &newNearestT);
-
-    if (x == 200 && y == 250) {
-        //printf("1: %p, %p, %p, %p, %u, %p, %p, %u, %i, %p, %p, %p\n", cameraOrigin, Rd, point, objects, numObjects, object, lights, numLights, iterationNum, reflectedRay, newObject, &reflectionColor);
-        printf("(%i) Object: %i\n", iterationNum, object->type);
-    }
 
     // If null, then there are no other objects to raytrace
     if (newObject == NULL)
@@ -311,10 +304,6 @@ inline PixelN raytrace(Object *object, float *point, float *Rd, float *cameraOri
     // Recursion
     reflectionColor = raytrace(newObject, newPoint, reflectedRay, cameraOrigin, objects,
                                numObjects, lights, numLights, iterationNum + 1, x, y);
-
-    // if (x == 200 && y == 250) {
-    //     printf("2: %p, %p, %p, %p, %u, %p, %p, %u, %i, %p, %p, %p\n", cameraOrigin, Rd, point, objects, numObjects, object, lights, numLights, iterationNum, reflectedRay, newObject, &reflectionColor);
-    // }
     
     reflectionColor.r *= object->reflectivity;
     reflectionColor.g *= object->reflectivity;
@@ -400,25 +389,30 @@ inline void renderScene(SceneData *sceneData, Pixel *image) {
             float intersectionPoint[3] = {};
             getIntersectionPoint(R0, Rd, nearestT, &intersectionPoint);
             
-            // If nearestObject is not null, there is at least one intersection
+            // If nearestObject is not null, there is at least one intersection.
             if (nearestObject != NULL) {
-                // PixelN pixelColorN = illuminate(sceneData->camera.origin, Rd, intersectionPoint,
-                //                                 sceneData->objects, sceneData->numObjects,
-                //                                 nearestObject, sceneData->lights,
-                //                                 sceneData->numLights);
-                
-                PixelN pixelColorN = raytrace(nearestObject, intersectionPoint, Rd, camera.origin,
-                                              sceneData->objects, sceneData->numObjects,
-                                              sceneData->lights, sceneData->numLights, 1, x, y);
+                PixelN pixelColorN, finalPixelColorN;
 
-                pixelColorN.r *= nearestObject->reflectivity;
-                pixelColorN.g *= nearestObject->reflectivity;
-                pixelColorN.b *= nearestObject->reflectivity;
-                
-                PixelN finalPixelColorN = illuminate(sceneData->camera.origin, intersectionPoint,
-                                                     sceneData->objects, sceneData->numObjects,
-                                                     nearestObject, sceneData->lights,
-                                                     sceneData->numLights, pixelColorN);
+                // Only raytrace if object is reflective
+                if (nearestObject->reflectivity > 0) {
+                    pixelColorN = raytrace(nearestObject, intersectionPoint, Rd, camera.origin,
+                                           sceneData->objects, sceneData->numObjects,
+                                           sceneData->lights, sceneData->numLights, 1, x, y);
+                    
+                    pixelColorN.r *= nearestObject->reflectivity;
+                    pixelColorN.g *= nearestObject->reflectivity;
+                    pixelColorN.b *= nearestObject->reflectivity;
+                }
+                else {
+                    pixelColorN.r = 0;
+                    pixelColorN.g = 0;
+                    pixelColorN.b = 0;
+                }
+
+                finalPixelColorN = illuminate(sceneData->camera.origin, intersectionPoint,
+                                              sceneData->objects, sceneData->numObjects,
+                                              nearestObject, sceneData->lights,
+                                              sceneData->numLights, pixelColorN);
 
                 // Convert from PixelN to Pixel for PPM output
                 Pixel pixelColor;
