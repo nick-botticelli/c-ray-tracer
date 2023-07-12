@@ -3,8 +3,8 @@ PROJECT = raytrace
 # -lm is needed by GCC
 LDFLAGS += -lm
 
-RELEASE_FLAGS = -Ofast -Wall -DNDEBUG -fvisibility=hidden -fno-stack-protector \
--fomit-frame-pointer -flto
+RELEASE_FLAGS = -Ofast -march=native -mtune=native -Wall -DNDEBUG -fvisibility=hidden \
+-fno-stack-protector -fomit-frame-pointer -flto
 
 DEBUG_FLAGS = -O0 -g3 -fno-omit-frame-pointer -Wno-format-security -fno-common \
 -fno-optimize-sibling-calls -Wall
@@ -19,12 +19,8 @@ ifeq ($(shell $(CC) -v 2>&1 | grep -v "Apple clang version" | grep -c "clang ver
         UNAME_S := $(shell uname -s)
         
         # Enable multithreading support with OpenMP
-        # Do not enable when turning in to BBlearn
-        # CC_FLAGS += -D OPENMP -Xpreprocessor -fopenmp
-        # LDFLAGS += -lomp
-
-        # Enable quadrics
-        # CC_FLAGS += -D QUADRICS
+        CC_FLAGS += -D OPENMP -Xpreprocessor -fopenmp
+        LDFLAGS += -lomp
 
         # Enable refraction
         # CC_FLAGS += -D REFRACTION

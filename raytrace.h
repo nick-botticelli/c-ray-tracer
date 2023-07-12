@@ -13,25 +13,35 @@
 
 #define DEFAULT_NS 20.0f
 
+#define OUTSIDE_IOR 1.00029 // Air (can also be 1.0)
+
 #define RECURSION_DEPTH 32
 
 typedef enum {
-    PLANE,
-    SPHERE,
-#ifdef QUADRICS
-    QUADRIC
-#endif
+    PLANE   = 0,
+    SPHERE  = 1,
+    QUADRIC = 2
 } ObjectType;
 
 typedef enum {
-    POINT,
-    SPOT
+    POINT = 0,
+    SPOT  = 1
 } LightType;
 
-typedef struct Object {
+typedef struct {
+    float a, b, c, d, e, f, g, h, i, j;
+} QuadricVariables;
+
+// TODO: Ray struct?
+typedef struct {
+    float R0[3];
+    float Rd[3];
+} Ray;
+
+typedef struct {
     ObjectType type;
     PixelN diffuseColor, specularColor;
-    float reflectivity, refractivity, ior;
+    float reflectivity, refractivity, ior, ns;
     
     union {
         // Plane properties
@@ -44,19 +54,16 @@ typedef struct Object {
         struct {
             float center[3];
             float radius;
-            float ns;
         };
         
         // Quadric properties
-#ifdef QUADRICS
         struct {
-            float constants[10];
+            QuadricVariables quadricVars;
         };
-#endif
     };
 } Object;
 
-typedef struct Light {
+typedef struct {
     LightType type;
     float position[3];
     float direction[3];
@@ -64,7 +71,7 @@ typedef struct Light {
     float radialA0, radialA1, radialA2, angularA0, theta, cosTheta;
 } Light;
 
-typedef struct Camera {
+typedef struct {
     int imageWidth, imageHeight;
     float vpWidth, vpHeight;
     float vpDistance;
@@ -72,7 +79,7 @@ typedef struct Camera {
 } Camera;
 
 // TODO: Use realloc to dynamically resize objects? Should be fine on stack
-typedef struct SceneData {
+typedef struct {
     Camera camera;
     
     Object objects[OBJECT_LIMIT];
@@ -82,15 +89,7 @@ typedef struct SceneData {
     size_t numLights;
 } SceneData;
 
-// TODO: Ray struct?
-typedef struct Ray {
-    float R0[3];
-    float Rd[3];
-} Ray;
-
-#ifdef QUADRICS
-extern inline float raycastQuadric(float *R0, float *Rd, float *constants);
-#endif
+extern inline float raycastQuadric(float *R0, float *Rd, QuadricVariables variables, bool largestT);
 
 /**
  Calculate ray-plane intersection where
@@ -108,9 +107,10 @@ extern inline float raycastPlane(float *R0, float *Rd, float *pn, float d);
  sphereCenter is the 3D coordinates of the center of the sphere, and
  radius is the radius of the sphere
  */
-extern inline float raycastSphere(float *R0, float *Rd, float *sphereCenter, float radius);
+extern inline float raycastSphere(float *R0, float *Rd, float *sphereCenter, float radius,
+                                  bool largestT);
 
-extern inline void calculateNormalVector(Object *object, float *point, float *N);
+extern inline void calculateNormalVector(Object *object, float *point, float *Rd, float *N);
 
 extern inline void getIntersectionPoint(float *R0, float *Rd, float t, float *intersectionPoint);
 
@@ -118,16 +118,15 @@ extern inline float calculateIllumination(float radialAtt, float angularAtt, flo
                                           float specularColor, float lightColor, float *L,
                                           float *N, float *R, float *V, float ns);
 
-extern inline PixelN illuminate(float *cameraOrigin, float *point, Object *objects,
-                                size_t numObjects, Object *object, Light *lights,
-                                size_t numLights, PixelN reflectionColor);
+extern inline PixelN illuminate(SceneData *sceneData, Object *object, float *point,
+                                PixelN reflectionColor, PixelN refractionColor);
 
-extern inline PixelN raytrace(Object *object, float *point, float *Rd, float *cameraOrigin,
-                              Object *objects, size_t numObjects, Light *lights, size_t numLights,
-                              int iterationNum, int x, int y);
+extern inline void raytrace(SceneData *sceneData, Object *object, float *point, float *Rd,
+                            int iterationNum, int x, int y, PixelN *reflectionColorOut,
+                            PixelN *refractionColorOut);
 
-extern inline Object *raycast(float *R0, float *Rd, Object *objects, size_t numObjects,
-                              Object *ignoredObject, float *nearestT);
+extern inline Object *raycast(SceneData *sceneData, float *R0, float *Rd, Object *ignoredObject,
+                              bool largestT, float *nearestT);
 
 extern inline void renderScene(SceneData *sceneData, Pixel *image);
 

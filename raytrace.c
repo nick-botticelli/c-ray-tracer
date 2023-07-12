@@ -7,8 +7,7 @@
 #include "ppmrw.h"
 #include "v3math.h"
 
-#ifdef QUADRICS
-inline float raycastQuadric(float *R0, float *Rd, float *constants) {
+inline float raycastQuadric(float *R0, float *Rd, QuadricVariables variables, bool largestT) {
     float x0 = R0[0];
     float y0 = R0[1];
     float z0 = R0[2];
@@ -17,16 +16,16 @@ inline float raycastQuadric(float *R0, float *Rd, float *constants) {
     float yd = Rd[1];
     float zd = Rd[2];
     
-    float A = constants[0];
-    float B = constants[1];
-    float C = constants[2];
-    float D = constants[3];
-    float E = constants[4];
-    float F = constants[5];
-    float G = constants[6];
-    float H = constants[7];
-    float I = constants[8];
-    float J = constants[9];
+    float A = variables.a;
+    float B = variables.b;
+    float C = variables.c;
+    float D = variables.d;
+    float E = variables.e;
+    float F = variables.f;
+    float G = variables.g;
+    float H = variables.h;
+    float I = variables.i;
+    float J = variables.j;
     
     // Axd2 + Byd2 + Czd2 + Dxdyd + Exdzd + Fydzd
     float Aq = (A * (xd * xd)) + (B * (yd * yd)) + (C * (zd * zd)) + (D * (xd * yd))
@@ -48,21 +47,26 @@ inline float raycastQuadric(float *R0, float *Rd, float *constants) {
     
     // Bq2 - 4AqCq
     float discriminant = (Bq * Bq) - (4 * Aq * Cq);
-    
+
     if (discriminant < 0)
         return 0;
-    
+
     // ( - Bq - ((Bq2 - 4AqCq))^0.5)/ 2Aq
     float t0 = (-Bq - sqrtf(discriminant)) / (2 * Aq);
-    
-    if (t0 > 0)
-        return t0;
-    
-    // ( - Bq + ((Bq2 - 4AqCq))^0.5)/ 2Aq
-    float t1 = (-Bq + sqrtf(discriminant)) / (2 * Aq);
-    return t1;
+
+    if (largestT) {
+        float t1 = (-Bq + sqrtf(discriminant)) / (2 * Aq);
+        return fmaxf(t0, t1);
+    }
+    else {
+        if (t0 > 0)
+            return t0;
+        
+        // ( - Bq + ((Bq2 - 4AqCq))^0.5)/ 2Aq
+        float t1 = (-Bq + sqrtf(discriminant)) / (2 * Aq);
+        return t1;
+    }
 }
-#endif
 
 inline float raycastPlane(float *R0, float *Rd, float *pn, float d) {
     // Rd = [Xd, Yd, Zd]
@@ -73,26 +77,27 @@ inline float raycastPlane(float *R0, float *Rd, float *pn, float d) {
     // plane = [A B C D]
 
     // calculate pn
-    float vD = v3_dot_product(pn, Rd);
+    float vD = f3_dot(pn, Rd);
 
     // If vD is zero, then the ray is parallel to the plane
     if (vD == 0) {
         return 0;
     }
 
-    float t = -(v3_dot_product(pn, R0) + d) / vD;
+    float t = -(f3_dot(pn, R0) + d) / vD;
     return t;
 }
 
-inline float raycastSphere(float *R0, float *Rd, float *sphereCenter, float radius) {
+inline float raycastSphere(float *R0, float *Rd, float *sphereCenter, float radius,
+                           bool largestT) {
     // Used in multiple calculations
     // R0 minus center
     float R0mC[3] = {};
-    v3_subtract(R0mC, R0, sphereCenter);
+    f3_subtract(R0mC, R0, sphereCenter);
     
-    float B = 2 * v3_dot_product(Rd, R0mC); // R0mC = (X0-Xc)
+    float B = 2 * f3_dot(Rd, R0mC); // R0mC = (X0-Xc)
     
-    float C = v3_dot_product(R0mC, R0mC); // (X0-Xc)^2
+    float C = f3_dot(R0mC, R0mC); // (X0-Xc)^2
     C -= radius * radius; // Sr^2
     
     float discriminant = (B * B) - (4 * C);
@@ -104,14 +109,22 @@ inline float raycastSphere(float *R0, float *Rd, float *sphereCenter, float radi
     // 1 or 2 intersections (discriminant = 0 is 1 tangential intersection)
     
     float t0 = (-B - sqrtf(discriminant)) / 2;
-    
-    // Return t0 if positive, otherwise calculate and return t1
-    if (t0 >= 0)
-        return t0;
-    
-    // TODO: This code never runs?
-    float t1 = (-B + sqrtf(discriminant)) / 2;
-    return t1;
+
+    if (largestT) {
+        // Get the farthest intersection t (for cases in which the intersection point is outside
+        //   the sphere)
+        float t1 = (-B + sqrtf(discriminant)) / 2;
+        return fmaxf(t0, t1);
+    }
+    else {
+        // Return t0 if positive, otherwise calculate and return t1
+        if (t0 >= 0)
+            return t0;
+        
+        // TODO: This code never runs?
+        float t1 = (-B + sqrtf(discriminant)) / 2;
+        return t1;
+    }
 }
 
 inline void getIntersectionPoint(float *R0, float *Rd, float t, float *intersectionPoint) {
@@ -121,7 +134,7 @@ inline void getIntersectionPoint(float *R0, float *Rd, float t, float *intersect
     intersectionPoint[2] = R0[2] + Rd[2] * t;
 }
 
-inline void calculateNormalVector(Object *object, float *point, float *N) {
+inline void calculateNormalVector(Object *object, float *point, float *Rd, float *N) {
     switch (object->type) {
         case PLANE:
             N[0] = object->pn[0];
@@ -129,8 +142,22 @@ inline void calculateNormalVector(Object *object, float *point, float *N) {
             N[2] = object->pn[2];
             break;
         case SPHERE:
-            v3_from_points(N, object->center, point);
-            v3_normalize(N, N);
+            f3_from_points(N, object->center, point);
+            f3_normalize(N, N);
+            break;
+        case QUADRIC:
+            N[0] = (2 * object->quadricVars.a * point[0]) + (object->quadricVars.d * point[1])
+                 + (object->quadricVars.e * point[2]) + object->quadricVars.g;
+            N[1] = (2 * object->quadricVars.b * point[1]) + (object->quadricVars.d * point[0])
+                 + (object->quadricVars.f * point[2]) + object->quadricVars.h;
+            N[2] = (2 * object->quadricVars.c * point[2]) + (object->quadricVars.e * point[0])
+                 + (object->quadricVars.f * point[1]) + object->quadricVars.i;
+            f3_normalize(N, N);
+
+            // If Rn dot Rd > 0, reverse Rn
+            // if (f3_dot(N, Rd) > 0)
+            //     f3_scale(N, -1);
+
             break;
     }
 }
@@ -138,8 +165,8 @@ inline void calculateNormalVector(Object *object, float *point, float *N) {
 inline float calculateIllumination(float radialAtt, float angularAtt, float diffuseColor,
                                    float specularColor, float lightColor, float *L, float *N,
                                    float *R, float *V, float ns) {
-    float NdotL = v3_dot_product(N, L);
-    float VdotR = v3_dot_product(V, R);
+    float NdotL = f3_dot(N, L);
+    float VdotR = f3_dot(V, R);
 
     // f1,rad_atten * f1,ang_atten * (kd * Il * (N dot L) + ks * Il * (R * V)^n)
     float illumination = radialAtt * angularAtt
@@ -151,56 +178,57 @@ inline float calculateIllumination(float radialAtt, float angularAtt, float diff
     return illumination;
 }
 
-inline PixelN illuminate(float *cameraOrigin, float *point, Object *objects,
-                         size_t numObjects, Object *object, Light *lights, size_t numLights, PixelN reflectionColor) {
+inline PixelN illuminate(SceneData *sceneData, Object *object, float *point,
+                         PixelN reflectionColor, PixelN refractionColor) {
     // point  - the point we are coloring
     // object - the object the point is on
     // Rd     - the view vector to the point
     
     PixelN color = { 0, 0, 0 };
-    PixelN reflectedColor = { 0, 0, 0 };
-    float reflectRefractModifier = 1 - object->reflectivity;
-#ifdef REFRACTION
-    reflectRefractModifier -= object->refractivity;
-#endif
+    // float reflectModifier = 1 - object->refractivity; // TODO: Pre-compute? TODO: Is this wrong?
+    float reflectModifier = object->reflectivity;
+    // float refractModifier = 1 - reflectModifier; // Is this wrong? I have no idea anymore
+    float refractModifier = object->refractivity;
+    // printf("reflect/refract: %f vs. %f\n", object->reflectivity, object->refractivity);
+    float illuminationModifier = 1 - reflectModifier - refractModifier; // TODO: Clamp?
     
-    for (size_t index = 0; index < numLights; index++) {
-        Light *light = &lights[index];
+    for (size_t index = 0; index < sceneData->numLights; index++) {
+        Light *light = &sceneData->lights[index];
 
         // Light position - point
         float Rd[3] = {};
-        v3_subtract(Rd, light->position, point);
-        v3_normalize(Rd, Rd);
+        f3_subtract(Rd, light->position, point);
+        f3_normalize(Rd, Rd);
 
         float nearestT;
-        raycast(point, Rd, objects, numObjects, object, &nearestT);
+        raycast(sceneData, point, Rd, object, false, &nearestT);
 
         // Length from point to light
         float pointLightVector[3] = { 0, 0, 0 };
-        v3_from_points(pointLightVector, point, light->position);
-        float distance = v3_length(pointLightVector);
+        f3_from_points(pointLightVector, point, light->position);
+        float distance = f3_length(pointLightVector);
         
         if (nearestT > 0 && nearestT < distance)
             continue;
 
         // Point to light vector
         float L[3] = {};
-        v3_normalize(L, pointLightVector);
+        f3_normalize(L, pointLightVector);
 
         // Surface normal vector
         float N[3] = {};
-        calculateNormalVector(object, point, &N);
+        calculateNormalVector(object, point, Rd, &N);
 
         float V[3] = {};
-        v3_from_points(V, point, cameraOrigin);
-        v3_normalize(V, V);
+        f3_from_points(V, point, sceneData->camera.origin);
+        f3_normalize(V, V);
 
         float VO[3] = { -L[0], -L[1], -L[2] };
 
         float R[3] = { 0, 0, 0 };
-        v3_reflect(R, VO, N); // L instead of VO as per Palmer's advice; so why does that not work?
-        //v3_reflect(R, L, N);
-        v3_normalize(R, R);
+        f3_reflect(R, VO, N); // TODO: L instead of VO as per Palmer's advice; so why does that not work?
+        //f3_reflect(R, L, N);
+        f3_normalize(R, R);
 
         float VL[3] = {};
 
@@ -209,10 +237,10 @@ inline PixelN illuminate(float *cameraOrigin, float *point, Object *objects,
 
         float angularAtt = 0;
         if (light->type == SPOT) {
-            v3_from_points(VL, light->position, light->direction);
-            v3_normalize(VL, VL);
+            f3_from_points(VL, light->position, light->direction);
+            f3_normalize(VL, VL);
 
-            float VOdotVL = v3_dot_product(VO, VL);
+            float VOdotVL = f3_dot(VO, VL);
 
             // If theta is zero, bad things may happen
             if (light->theta == 0) {
@@ -236,29 +264,37 @@ inline PixelN illuminate(float *cameraOrigin, float *point, Object *objects,
             }
         }
         else {
-            v3_from_points(VL, light->position, point);
-            v3_normalize(VL, VL);
+            f3_from_points(VL, light->position, point);
+            f3_normalize(VL, VL);
             angularAtt = 1;
         }
 
-        color.r += clamp(reflectRefractModifier
-                         * calculateIllumination(radialAtt, angularAtt, object->diffuseColor.r,
-                                                 object->specularColor.r, light->color.r, L, N, R,
-                                                 V, object->ns)
-                         + reflectionColor.r, 0, 1);
-        color.g += clamp(reflectRefractModifier
-                         * calculateIllumination(radialAtt, angularAtt, object->diffuseColor.g,
-                                                 object->specularColor.g, light->color.g, L, N, R,
-                                                 V, object->ns)
-                         + reflectionColor.g, 0, 1);
-        color.b += clamp(reflectRefractModifier
-                         * calculateIllumination(radialAtt, angularAtt, object->diffuseColor.b,
-                                                 object->specularColor.b, light->color.b, L, N, R,
-                                                 V, object->ns)
-                         + reflectionColor.b, 0, 1);
+        color.r += f_clamp(illuminationModifier
+                           * calculateIllumination(radialAtt, angularAtt, object->diffuseColor.r,
+                                                   object->specularColor.r, light->color.r, L, N,
+                                                   R, V, object->ns)
+                           + reflectModifier * reflectionColor.r
+                           + refractModifier * refractionColor.r,
+                         0, 1);
+        color.g += f_clamp(illuminationModifier
+                           * calculateIllumination(radialAtt, angularAtt, object->diffuseColor.g,
+                                                   object->specularColor.g, light->color.g, L, N,
+                                                   R, V, object->ns)
+                           + reflectModifier * reflectionColor.g
+                           + refractModifier * refractionColor.g,
+                         0, 1);
+        color.b += f_clamp(illuminationModifier
+                           * calculateIllumination(radialAtt, angularAtt, object->diffuseColor.b,
+                                                   object->specularColor.b, light->color.b, L, N,
+                                                   R, V, object->ns)
+                           + reflectModifier * reflectionColor.b
+                           + refractModifier * refractionColor.b,
+                         0, 1);
     }
 
     //color += ambient;
+
+    // printf("illuminate(): color: (%f, %f, %f); ", color.r, color.g, color.b); // TODO: Remove
 
     return color;
 }
@@ -268,58 +304,141 @@ int highestIteration = 0;
 #endif
 
 // Returns reflection color
-inline PixelN raytrace(Object *object, float *point, float *Rd, float *cameraOrigin,
-                       Object *objects, size_t numObjects, Light *lights, size_t numLights,
-                       int iterationNum, int x, int y) {
+inline void raytrace(SceneData *sceneData, Object *object, float *point, float *Rd,
+                     int iterationNum, int x, int y, PixelN *reflectionColorOut,
+                     PixelN *refractionColorOut) {
     PixelN reflectionColor = { 0, 0, 0 };
+    PixelN refractionColor = { 0, 0, 0 };
 
 #ifndef NDEBUG
     if (highestIteration < iterationNum)
         highestIteration = iterationNum;
 #endif
 
-    if (iterationNum > RECURSION_DEPTH)
-        return reflectionColor; // Black
+    if (iterationNum > RECURSION_DEPTH) {
+        // Black
+        // printf("raytrace(): # of iterations exceeded maximum depth (%d vs. %d); returning black", iterationNum, RECURSION_DEPTH); // TODO: Remove
+        *reflectionColorOut = reflectionColor;
+        *refractionColorOut = refractionColor;
+        return;
+    }
     
     float pointNormal[3] = { 0, 0, 0 };
-    calculateNormalVector(object, point, pointNormal);
+    calculateNormalVector(object, point, Rd, pointNormal);
 
     // Get reflected ray direction from intersected point
     float reflectedRay[3] = { 0, 0, 0 };
-    v3_reflect(reflectedRay, Rd, pointNormal);
-    v3_normalize(reflectedRay, reflectedRay);
+    f3_reflect(reflectedRay, Rd, pointNormal);
+    f3_normalize(reflectedRay, reflectedRay);
 
     // Get the new object and new nearest t from reflected ray
     float newNearestT;
-    Object *newObject = raycast(point, reflectedRay, objects, numObjects, object, &newNearestT);
+    Object *newObject = raycast(sceneData, point, reflectedRay, object, false, &newNearestT);
 
     // If null, then there are no other objects to raytrace
-    if (newObject == NULL)
-        return reflectionColor; // Black
+    if (newObject == NULL) {
+        // Black
+        // printf("raytrace(): no more objects to raytrace; returning black"); // TODO: Remove
+        *reflectionColorOut = reflectionColor;
+        *refractionColorOut = refractionColor;
+        return;
+    }
 
     // Calculate intersection point at new object
     float newPoint[3] = { 0, 0, 0 };
-    getIntersectionPoint(point, reflectedRay, newNearestT, newPoint);
+    getIntersectionPoint(point, reflectedRay, newNearestT, &newPoint); // TODO: Remove?
 
     // Recursion
-    reflectionColor = raytrace(newObject, newPoint, reflectedRay, cameraOrigin, objects,
-                               numObjects, lights, numLights, iterationNum + 1, x, y);
+    PixelN newReflectionColor, newRefractionColor;
+    raytrace(sceneData, newObject, newPoint, reflectedRay, iterationNum + 1, x, y,
+             &newReflectionColor, &newRefractionColor);
     
-    reflectionColor.r *= object->reflectivity;
-    reflectionColor.g *= object->reflectivity;
-    reflectionColor.b *= object->reflectivity;
+    newReflectionColor.r *= object->reflectivity;
+    newReflectionColor.g *= object->reflectivity;
+    newReflectionColor.b *= object->reflectivity;
 
-    return illuminate(cameraOrigin, newPoint, objects, numObjects, newObject, lights,
-                      numLights, reflectionColor);
+    *reflectionColorOut = illuminate(sceneData, newObject, newPoint, newReflectionColor, newRefractionColor);
+
+    // // Snell's Law
+    // // puts("Snell's law!");
+
+    // // Opposite direction for inside normal
+    // // float insideRd[3] = {};
+    // // f3_scale(Rd, -1);
+
+    // // float insideN[3] = {};
+    // // calculateNormalVector(nearestObject, intersectionPoint, insideRd, insideN);
+
+    // float N[3]= {};
+    // calculateNormalVector(nearestObject, intersectionPoint, Rd, N);
+
+    // float a[3] = {};
+    // f3_cross(a, N, Rd);
+
+    // float b[3] = {};
+    // f3_cross(b, a, N);
+
+    // float rhoR = OUTSIDE_IOR;        // IOR of external medium
+    // float rhoT = nearestObject->ior; // IOR of inside medium
+
+    // // TODO: Should sinPhi be absolute value?
+    // float sinPhi = (rhoR / rhoT) * (f3_dot(Rd, b));
+    // float cosPhi = sqrtf(1 - (sinPhi * sinPhi));
+
+    // // ut = −ncosϕ + bsinϕ
+    // // Also known as T in Scratchapixel notes
+    // float ut[3] = { N[0], N[1], N[2] };
+    // f3_scale(ut, -cosPhi);
+
+    // float bSinPhi[3] = { b[0], b[1], b[2] };
+    // f3_scale(bSinPhi, sinPhi);
+
+    // f3_add(ut, ut, bSinPhi);
+    // // TODO: Normalize?
+    // //f3_normalize(ut, ut);
+
+    // // Raycast inside object in direction ut
+    // // TODO: Should other objects be intersected if inside object?
+    // float largestT;
+    // raycast(intersectionPoint, ut, nearestObject, 1, NULL, true, &largestT);
+
+    // float newIntersectionPoint[3] = {};
+    // getIntersectionPoint(intersectionPoint, ut, largestT, &newIntersectionPoint);
+
+    // // Set color?
+    // PixelN reflectionColorNOut;
+    // PixelN refractionColorNOut;
+    // raytrace(nearestObject, newIntersectionPoint, Rd, camera.origin,
+    //             sceneData->objects, sceneData->numObjects, sceneData->lights,
+    //             sceneData->numLights, 1, x, y, &pixelColorNRefracted,
+    //             &pixelColorNRefracted);
+
+    // TODO: Fresnel (Scratchapixel)
+    // float cosi = f_clamp(-1, 1, dotProduct(I, N));
+    // float etai = 1, etat = ior;
+    // if (cosi > 0) { std::swap(etai, etat); }
+    // // Compute sini using Snell's law
+    // float sint = etai / etat * sqrtf(std::max(0.f, 1 - cosi * cosi));
+    // // Total internal reflection
+    // if (sint >= 1) {
+    //     kr = 1;
+    // }
+    // else {
+    //     float cost = sqrtf(std::max(0.f, 1 - sint * sint));
+    //     cosi = fabsf(cosi);
+    //     float Rs = ((etat * cosi) - (etai * cost)) / ((etat * cosi) + (etai * cost));
+    //     float Rp = ((etai * cosi) - (etat * cost)) / ((etai * cosi) + (etat * cost));
+    //     kr = (Rs * Rs + Rp * Rp) / 2;
+    // }
 }
 
-inline Object *raycast(float *R0, float *Rd, Object *objects, size_t numObjects,
-                       Object *ignoredObject, float *nearestT) {
+inline Object *raycast(SceneData *sceneData, float *R0, float *Rd,
+                       Object *ignoredObject, bool largestT, float *nearestT) {
     Object *curNearestObject = NULL;
     float curNearestT = INFINITY;
     
-    for (size_t index = 0; index < numObjects; index++) {
-        Object *object = &objects[index];
+    for (size_t index = 0; index < sceneData->numObjects; index++) {
+        Object *object = &sceneData->objects[index];
         float t = 0;
 
         if (object == ignoredObject)
@@ -330,13 +449,11 @@ inline Object *raycast(float *R0, float *Rd, Object *objects, size_t numObjects,
                 t = raycastPlane(R0, Rd, object->pn, object->d);
                 break;
             case SPHERE:
-                t = raycastSphere(R0, Rd, object->center, object->radius);
+                t = raycastSphere(R0, Rd, object->center, object->radius, largestT);
                 break;
-#ifdef QUADRICS
             case QUADRIC:
-                t = raycastQuadric(R0, Rd, object->constants);
+                t = raycastQuadric(R0, Rd, object->quadricVars, largestT);
                 break;
-#endif
         }
         
         // If intersection exists (not 0) and is positive (in front of camera), set it to nearest
@@ -358,7 +475,8 @@ inline void renderScene(SceneData *sceneData, Pixel *image) {
     float PxInitial = (camera.vpWidth * -.5) + (dX * .5);
     float PyInitial = (camera.vpHeight * .5) + (dY * .5);
     float Pz = -camera.vpDistance;
-    
+
+// TODO: Is this ifdef needed anymore?
 #ifdef OPENMP
 #pragma omp parallel for firstprivate(sceneData, R0, dX, dY, PxInitial, PyInitial, Pz) \
                          private(camera)
@@ -379,26 +497,30 @@ inline void renderScene(SceneData *sceneData, Pixel *image) {
             
             // P - R0
             float Rd[3] = {};
-            v3_subtract(Rd, P, R0);
-            v3_normalize(Rd, Rd);
+            f3_subtract(Rd, P, R0);
+            f3_normalize(Rd, Rd);
             
             float nearestT;
-            Object *nearestObject = raycast(R0, Rd, sceneData->objects, sceneData->numObjects,
-                                            NULL, &nearestT);
+            Object *nearestObject = raycast(sceneData, R0, Rd, NULL, false, &nearestT);
+
+            // printf("raycast nearestT: %f; ", nearestT); // TODO: Remove
 
             float intersectionPoint[3] = {};
             getIntersectionPoint(R0, Rd, nearestT, &intersectionPoint);
+
+            // printf("intersectionPoint: (%f, %f, %f); ", intersectionPoint[0], intersectionPoint[1], intersectionPoint[2]); // TODO: Remove
             
             // If nearestObject is not null, there is at least one intersection.
             if (nearestObject != NULL) {
-                PixelN pixelColorN, finalPixelColorN;
+                PixelN pixelColorN = {}, pixelColorNRefracted = {}, finalPixelColorN = {};
+
+                if (nearestObject->reflectivity > 0 || nearestObject->refractivity > 0) {
+                    raytrace(sceneData, nearestObject, intersectionPoint, Rd, 1, x, y,
+                             &pixelColorN, &pixelColorNRefracted);
+                }
 
                 // Only raytrace if object is reflective
                 if (nearestObject->reflectivity > 0) {
-                    pixelColorN = raytrace(nearestObject, intersectionPoint, Rd, camera.origin,
-                                           sceneData->objects, sceneData->numObjects,
-                                           sceneData->lights, sceneData->numLights, 1, x, y);
-                    
                     pixelColorN.r *= nearestObject->reflectivity;
                     pixelColorN.g *= nearestObject->reflectivity;
                     pixelColorN.b *= nearestObject->reflectivity;
@@ -409,10 +531,19 @@ inline void renderScene(SceneData *sceneData, Pixel *image) {
                     pixelColorN.b = 0;
                 }
 
-                finalPixelColorN = illuminate(sceneData->camera.origin, intersectionPoint,
-                                              sceneData->objects, sceneData->numObjects,
-                                              nearestObject, sceneData->lights,
-                                              sceneData->numLights, pixelColorN);
+                // TODO: Refraction
+                if (nearestObject->refractivity > 0) { // TODO: > 1?
+                    // pixelColorN.r *= nearestObject->refractivity;
+                }
+                else {
+                    pixelColorNRefracted.r = 0;
+                    pixelColorNRefracted.g = 0;
+                    pixelColorNRefracted.b = 0;
+                }
+
+                // Repeat last step in raytrace function here since no more recursion (TODO)
+                finalPixelColorN = illuminate(sceneData, nearestObject, intersectionPoint,
+                                              pixelColorN, pixelColorNRefracted);
 
                 // Convert from PixelN to Pixel for PPM output
                 Pixel pixelColor;
@@ -438,10 +569,8 @@ inline void parseSceneInput(FILE *inputFile, SceneData *sceneData) {
         curObject = &sceneData->objects[objIndex];
         curLight = &sceneData->lights[lightIndex];
 
-#ifdef REFRACTION
         curObject->refractivity = 0;
         curObject->ior = 0;
-#endif
 
 #ifndef NDEBUG
         printf("parseSceneInput: \"%s\"\n", inputBuf);
@@ -468,6 +597,7 @@ inline void parseSceneInput(FILE *inputFile, SceneData *sceneData) {
         }
         else if (strcmp(inputBuf, "plane,") == 0) {
             float position[3];
+            bool hasNs = false;
             
             const int numProperties = 5;
             for (int i = 0; i < 5; i++) {
@@ -507,21 +637,21 @@ inline void parseSceneInput(FILE *inputFile, SceneData *sceneData) {
                     fscanf(inputFile, "%s", inputBuf);
             }
 
+            if (!hasNs)
+                curObject->ns = DEFAULT_NS;
+            hasNs = false;
+
             PixelN specularColor = { 0, 0, 0 };
             
             curObject->type = PLANE;
-            curObject->d = -v3_dot_product(position, curObject->pn);
+            curObject->d = -f3_dot(position, curObject->pn);
             curObject->specularColor = specularColor;
             objIndex++;
         }
         else if (strcmp(inputBuf, "sphere,") == 0) {
             bool hasNs = false;
 
-#ifdef REFRACTION
             const int numProperties = 8;
-#else
-            const int numProperties = 6;
-#endif
             for (int i = 0; i < numProperties; i++) {
                 fscanf(inputFile, "%s", inputBuf);
 
@@ -547,17 +677,16 @@ inline void parseSceneInput(FILE *inputFile, SceneData *sceneData) {
                 else if (strcmp(inputBuf, "reflectivity:") == 0) {
                     fscanf(inputFile, " %f", &curObject->reflectivity);
                 }
-#ifdef REFRACTION
                 else if (strcmp(inputBuf, "refractivity:") == 0) {
                     fscanf(inputFile, " %f", &curObject->refractivity);
                 }
                 else if (strcmp(inputBuf, "ior:") == 0) {
                     fscanf(inputFile, " %f", &curObject->ior);
                 }
-#endif
-                
-                // Check for existence of comma before optional ns property
-                if (i == numProperties - 2) {
+
+                // Check for existence of comma before optional refractivity, ior, and ns
+                //   properties
+                if (i == numProperties - 4 || i == numProperties - 3 || i == numProperties - 2) {
                     char curChar = fgetc(inputFile);
 
                     // If there is no comma, there are only 4 (no ns)
@@ -579,9 +708,10 @@ inline void parseSceneInput(FILE *inputFile, SceneData *sceneData) {
             // TODO: Increment & set new pointer with 1 statemnent (macro/function?)
             objIndex++;
         }
-#ifdef QUADRICS
         else if (strcmp(inputBuf, "quadric,") == 0) {
-            const int numProperties = 2;
+            bool hasNs = false;
+
+            const int numProperties = 7;
             for (int i = 0; i < numProperties; i++) {
                 fscanf(inputFile, "%s", inputBuf);
 
@@ -589,24 +719,57 @@ inline void parseSceneInput(FILE *inputFile, SceneData *sceneData) {
                     fscanf(inputFile, " [%f, %f, %f]", &curObject->diffuseColor.r,
                            &curObject->diffuseColor.g, &curObject->diffuseColor.b);
                 }
+                else if (strcmp(inputBuf, "specular_color:") == 0) {
+                    fscanf(inputFile, " [%f, %f, %f]", &curObject->specularColor.r,
+                    &curObject->specularColor.g, &curObject->specularColor.b);
+                }
                 else if (strcmp(inputBuf, "constants:") == 0) {
                     fscanf(inputFile, " [%f, %f, %f, %f, %f, %f, %f, %f, %f, %f]",
-                           &curObject->constants[0], &curObject->constants[1],
-                           &curObject->constants[2], &curObject->constants[3],
-                           &curObject->constants[4], &curObject->constants[5],
-                           &curObject->constants[6], &curObject->constants[7],
-                           &curObject->constants[8], &curObject->constants[9]);
+                           &curObject->quadricVars.a, &curObject->quadricVars.b,
+                           &curObject->quadricVars.c, &curObject->quadricVars.d,
+                           &curObject->quadricVars.e, &curObject->quadricVars.f,
+                           &curObject->quadricVars.g, &curObject->quadricVars.h,
+                           &curObject->quadricVars.i, &curObject->quadricVars.j);
+                }
+                else if (strcmp(inputBuf, "reflectivity:") == 0) {
+                    fscanf(inputFile, " %f", &curObject->reflectivity);
+                }
+                else if (strcmp(inputBuf, "ns:") == 0) {
+                    fscanf(inputFile, " %f", &curObject->ns);
+                    hasNs = true;
+                }
+                else if (strcmp(inputBuf, "refractivity:") == 0) {
+                    fscanf(inputFile, " %f", &curObject->refractivity);
+                }
+                else if (strcmp(inputBuf, "ior:") == 0) {
+                    fscanf(inputFile, " %f", &curObject->ior);
                 }
                 
+                // Check for existence of comma before optional ns property
+                if (i == numProperties - 2) {
+                    char curChar = fgetc(inputFile);
+
+                    // If there is no comma, there are only 4 (no ns)
+                    if (curChar != ',') {
+                        ungetc(curChar, inputFile);
+                        break;
+                    }
+                }
                 // Skip comma
-                if (i != numProperties - 1)
+                else if (i != numProperties - 1)
                     fscanf(inputFile, "%s", inputBuf);
             }
+
+            // TODO: Causes problems (black screen)?
+            if (!hasNs)
+                curObject->ns = DEFAULT_NS;
+            hasNs = false;
             
             curObject->type = QUADRIC;
             objIndex++;
+
+            // __builtin_dump_struct(curObject, &printf);
         }
-#endif
         else if (strcmp(inputBuf, "light,") == 0) {
             bool hasDirection = false;
             
@@ -630,7 +793,7 @@ inline void parseSceneInput(FILE *inputFile, SceneData *sceneData) {
                 else if (strcmp(inputBuf, "theta:") == 0) {
                     float theta;
                     fscanf(inputFile, " %f", &theta);
-                    curLight->theta = toRadians(theta);
+                    curLight->theta = f_to_radians(theta);
                     curLight->cosTheta = cosf(curLight->theta);
                 }
                 else if (strcmp(inputBuf, "radial-a0:") == 0) {
@@ -669,13 +832,13 @@ inline void parseSceneInput(FILE *inputFile, SceneData *sceneData) {
 
     fclose(inputFile);
 
-    float camerOrigin[3] = { 0, 0, 0 };
+    float cameraOrigin[3] = { 0, 0, 0 };
 
     sceneData->numObjects = objIndex;
     sceneData->numLights = lightIndex;
-    sceneData->camera.origin[0] = camerOrigin[0];
-    sceneData->camera.origin[1] = camerOrigin[1];
-    sceneData->camera.origin[2] = camerOrigin[2];
+    sceneData->camera.origin[0] = cameraOrigin[0];
+    sceneData->camera.origin[1] = cameraOrigin[1];
+    sceneData->camera.origin[2] = cameraOrigin[2];
 }
 
 int main(int argc, const char *argv[]) {
